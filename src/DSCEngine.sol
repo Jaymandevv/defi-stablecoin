@@ -32,6 +32,8 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__TokenAddressesAndPriceFeedAddressesMustBeSameLength();
     error DSCEngine__NotAllowedToken();
     error DSCEngine__TransferFailed();
+    error DSCEngine_BreaksHealthFactor(uint256 userHealthFactor);
+    error DSCEngine_MintFailed();
 
     struct MintInfo {
         uint256 amount;
@@ -42,6 +44,8 @@ contract DSCEngine is ReentrancyGuard {
     uint256 private constant ADITIONAL_FEED_PRECISION = 1e10;
     uint256 private constant PRECISION = 1e18;
     uint256 private constant LIQUIDATION_THRESHOLD = 50;
+    uint256 private constant LIQUIDATION_PRECISION = 100;
+    uint256 private constant MIN_HEALTH_FACTOR = 1;
 
     mapping(address token => address priceFeed) private s_priceFeeds;
     mapping(address user => mapping(address token => uint256 amount)) private s_collateralDeposited;
@@ -116,6 +120,9 @@ contract DSCEngine is ReentrancyGuard {
     function mintDsc(uint256 amountDscToMint) external moreThanZero(amountDscToMint) nonReentrant {
         s_DSCMinted[msg.sender] += amountDscToMint;
         s_userMints[msg.sender].push(MintInfo({amount: amountDscToMint, timestamp: block.timestamp}));
+        _revertIfHealthFactorIsBroken(msg.sender);
+        (bool minted) = i_dsc.mint(msg.sender, amountDscToMint);
+        if (!minted) revert DSCEngine_MintFailed();
     }
 
     function burnDsc() external {}
@@ -142,15 +149,26 @@ contract DSCEngine is ReentrancyGuard {
     /**
      * @notice Returns how close to liquidation a user is.
      *  If a user goes below 1, then they can get liquidated.
+     *  With this user need to deposited at least 2X value(i.e 200%) of their minted DSC stay safe
+     *  1. Let say user deposits $150 of ETH and minted DSC worth $100
+     *  The math: 150(collateral value) * 50(liquidation_threshold) / 100 (liquidation_precision) = 75 / 100(totalminted DSC) = 0.75 --> Liquidated since health factor is less than 1.
+     *  2. Depoiting  200% of the minted DSC ($200)
+     *  The math: 200(collateral value) * 50(liquidation_threshold) / 100 (liquidation_precision) = 100 / 100(totalminted DSC) = 1 --> Safe since health factor is 1.
      */
     function _healthFactor(address user) private view returns (uint256) {
         (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
-        return (collateralValueInUsd ? totalDscMinted);
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+
+        return ((collateralAdjustedForThreshold * PRECISION) / totalDscMinted);
     }
 
     function _revertIfHealthFactorIsBroken(address user) internal view {
         // 1. Check health factor (do they have enough collateral)
         // 2.Revert if they don't
+
+        uint256 userHealthFactor = _healthFactor(user);
+
+        if (userHealthFactor < MIN_HEALTH_FACTOR) revert DSCEngine_BreaksHealthFactor(userHealthFactor);
     }
 
     // Public & external view function

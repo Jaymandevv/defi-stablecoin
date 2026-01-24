@@ -2,7 +2,6 @@
 pragma solidity ^0.8.0;
 
 /**
- * @author i
  * @title MockV3Aggregator
  * @notice Based on the FluxAggregator contract
  * @notice Use this contract when you need to test

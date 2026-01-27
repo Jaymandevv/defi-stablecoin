@@ -57,6 +57,7 @@ contract DSCEngine is ReentrancyGuard {
 
     // Events
     event CollateralDeposited(address indexed user, address indexed token, uint256 indexed amount);
+    event CollateralRedeemed(address indexed user, uint256 indexed amount, address indexed token);
     // Modifiers
 
     modifier moreThanZero(uint256 amount) {
@@ -123,9 +124,28 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     //** Turns DSC back to whatever collateral originally used to mint the DSC */
-    function redeemCollaterallForDsc() external {}
+    // This function burns DSC and redeems underlying collateral in one transaction
+    function redeemCollateralForDsc(address tokenCollateralAddress, uint256 amountCollateral, uint256 amountDscToBurn)
+        external
+    {
+        burnDsc(amountDscToBurn);
+        redeemCollateral(tokenCollateralAddress, amountCollateral);
+    }
 
-    function redeemCollaterall() external {}
+    // In order to redeem collateral
+    // 1. health factor must be over 1 AFTER collateral pulled
+    function redeemCollateral(address tokenCollateralAddress, uint256 amountCollateral)
+        public
+        moreThanZero(amountCollateral)
+        nonReentrant
+    {
+        s_collateralDeposited[msg.sender][tokenCollateralAddress] -= amountCollateral;
+        emit CollateralRedeemed(msg.sender, amountCollateral, tokenCollateralAddress);
+
+        bool success = IERC20(tokenCollateralAddress).transfer(msg.sender, amountCollateral);
+        if (!success) revert DSCEngine__TransferFailed();
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
 
     /**
      * @param amountDscToMint The amount of decentralized stablecoin to mint
@@ -139,7 +159,13 @@ contract DSCEngine is ReentrancyGuard {
         if (!minted) revert DSCEngine_MintFailed();
     }
 
-    function burnDsc() external {}
+    function burnDsc(uint256 amountToBurn) public moreThanZero(amountToBurn) {
+        s_DSCMinted[msg.sender] -= amountToBurn;
+        bool success = i_dsc.transferFrom(msg.sender, address(this), amountToBurn);
+        if (!success) revert DSCEngine__TransferFailed();
+        i_dsc.burn(amountToBurn);
+        _revertIfHealthFactorIsBroken(msg.sender); // This might never hit... Burning dsc would probably never affect the healthfactor since we are removing from the debt
+    }
 
     function liquidate() external {}
 

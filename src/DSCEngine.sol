@@ -239,10 +239,11 @@ contract DSCEngine is ReentrancyGuard {
     function _getAccountInformation(address user)
         private
         view
-        returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
+        returns (uint256 totalDscMinted, uint256 collateralValueInUsd, MintInfo[] memory userMints)
     {
         totalDscMinted = s_DSCMinted[user];
         collateralValueInUsd = getAccountCollateralValue(user);
+        userMints = s_userMints[user];
     }
 
     /**
@@ -255,7 +256,7 @@ contract DSCEngine is ReentrancyGuard {
      *  The math: 200(collateral value) * 50(liquidation_threshold) / 100 (liquidation_precision) = 100 / 100(totalminted DSC) = 1 --> Safe since health factor is 1.
      */
     function _healthFactor(address user) private view returns (uint256) {
-        (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
+        (uint256 totalDscMinted, uint256 collateralValueInUsd,) = _getAccountInformation(user);
         uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
 
         return ((collateralAdjustedForThreshold * PRECISION) / totalDscMinted);
@@ -299,5 +300,13 @@ contract DSCEngine is ReentrancyGuard {
         uint256 tokenPrice = ((uint256(price) * ADITIONAL_FEED_PRECISION) * amount) / PRECISION;
 
         return tokenPrice;
+    }
+
+    function getAccountInformation(address user)
+        external
+        view
+        returns (uint256 totalDscMinted, uint256 collateralValueInUsd, MintInfo[] memory userMints)
+    {
+        (totalDscMinted, collateralValueInUsd, userMints) = _getAccountInformation(user);
     }
 }
